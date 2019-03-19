@@ -724,15 +724,27 @@ def _try_compile_weak_script(fn):
         return entry["compiled_fn"]
 
 
+# ScriptClasses must be new-style classes because we construct them using their
+# __new__ method.
+def _is_new_style_class(cls):
+    if hasattr(cls, '__class__'):
+        return ('__dict__' in dir(cls) or hasattr(cls, '__slots__'))
+
+
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
         return obj
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
     if inspect.isclass(obj):
-        mod = ScriptClass(obj.__name__)
+        if not _is_new_style_class(obj):
+            raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
+        name = obj.__name__
+        mod = ScriptClass(name)
         ast = get_jit_class_def(obj)
         _jit_script_class_compile(mod, ast, _rcb)
+        _add_script_class(obj, name)
+        return obj
     else:
         mod = ScriptModule()
         ast = get_jit_def(obj)
@@ -1537,6 +1549,18 @@ def _find_builtin(fn):
 
 _register_builtin(len, 'aten::len')
 _register_builtin(_wait, 'aten::wait')
+
+_script_classes = {}
+
+
+def _add_script_class(cls, name):
+    global _script_classes
+    _script_classes[name] = cls
+
+
+def _get_script_class(name):
+    global _script_classes
+    return _script_classes[name]
 
 # torch.jit.Error
 Error = torch._C.JITException
